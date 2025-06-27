@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Data - Cleverly Sales Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.2/css/buttons.dataTables.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/fixedheader/3.4.0/css/fixedHeader.dataTables.min.css">
+    <style>
+        body { background-color: #f8f9fa; }
+        .navbar-brand { font-weight: bold; }
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+        .loading-spinner {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            text-align: center;
+        }
+        .table-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            overflow: hidden;
+            margin-top: 20px;
+        }
+        .table {
+            margin-bottom: 0;
+            font-size: 13px;
+        }
+        .table th {
+            background: #f8f9fa;
+            font-weight: 600;
+            border-top: none;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .table td {
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .filter-container {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-lg">
+            <a class="navbar-brand" href="#">Cleverly Sales Dashboard</a>
+            <button class="navbar-toggler" type="button" data-toggle="collapse"
+                    data-target="#navbarSupportedContent"
+                    aria-controls="navbarSupportedContent"
+                    aria-expanded="false"
+                    aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarSupportedContent">
+                <ul class="navbar-nav ml-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/dashboard">Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/chatbot">Chatbot</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/predictions">Predictions</a>
+                    </li>
+                    <li class="nav-item active">
+                        <a class="nav-link" href="/data">Data <span class="sr-only">(current)</span></a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="/logout">Logout</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-lg mt-4">
+        <div class="row">
+            <div class="col-12">
+                <h2>Data Visualisation</h2>
+                <p class="text-muted">Retrieves invitee data from Calendly and merges it with Monday.com records on the Email field to append lead source tags (e.g., cold-email, LinkedIn).</p>
+            </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="row">
+            <div class="col-12">
+                <div class="filter-container">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <button id="fetch-data-btn" class="btn btn-primary btn-lg">
+                                <i class="fas fa-download"></i> Fetch Data
+                            </button>
+                        </div>
+                        <div class="col-md-6 text-right">
+                            <div id="data-status" class="mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Table -->
+        <div class="row">
+            <div class="col-12">
+                <div class="table-container" id="table-container" style="display: none;">
+                    <table id="data-table" class="table table-striped table-bordered">
+                        <thead></thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-spinner">
+            <div class="spinner-border text-light" role="status">
+                <span class="sr-only">Loading...</span>
+            </div>
+            <div class="mt-2" id="loading-text">Fetching data...</div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.print.min.js"></script>
+    <script src="https://cdn.datatables.net/fixedheader/3.4.0/js/dataTables.fixedHeader.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://kit.fontawesome.com/a076d05399.js"></script>
+
+    <script>
+        let dataTable;
+
+        function showLoading(message = 'Fetching data...') {
+            $('#loading-text').text(message);
+            $('#loading-overlay').fadeIn();
+        }
+
+        function hideLoading() {
+            $('#loading-overlay').fadeOut();
+        }
+
+        function renderTable(data) {
+            if (dataTable) {
+                dataTable.destroy();
+            }
+
+            if (!data.length) {
+                $('#table-container').hide();
+                $('#data-status').html('<div class="alert alert-warning">No data available</div>');
+                return;
+            }
+
+            // Get all unique columns
+            const allColumns = new Set();
+            data.forEach(row => {
+                Object.keys(row).forEach(key => allColumns.add(key));
+            });
+            const columns = Array.from(allColumns);
+
+            // Build table HTML
+            let headerHtml = '<tr>';
+            columns.forEach(col => {
+                headerHtml += `<th>${col}</th>`;
+            });
+            headerHtml += '</tr>';
+
+            let bodyHtml = '';
+            data.forEach(row => {
+                bodyHtml += '<tr>';
+                columns.forEach(col => {
+                    const value = row[col] || '';
+                    const displayValue = typeof value === 'object' ? JSON.stringify(value) : String(value);
+                    bodyHtml += `<td title="${displayValue}">${displayValue}</td>`;
+                });
+                bodyHtml += '</tr>';
+            });
+
+            $('#data-table thead').html(headerHtml);
+            $('#data-table tbody').html(bodyHtml);
+
+            // Show table container
+            $('#table-container').show();
+
+            // Initialize DataTable with advanced features
+            dataTable = $('#data-table').DataTable({
+                dom: 'Bfrtip',
+                buttons: [
+                    'copy', 'csv', 'excel', 'pdf', 'print'
+                ],
+                scrollX: true,
+                scrollY: '60vh',
+                scrollCollapse: true,
+                fixedHeader: true,
+                pageLength: 50,
+                lengthMenu: [[25, 50, 100, 500, -1], [25, 50, 100, 500, "All"]],
+                order: [],
+                search: {
+                    smart: true,
+                    regex: false,
+                    caseInsensitive: true
+                },
+                columnDefs: [
+                    {
+                        targets: '_all',
+                        render: function(data, type, row) {
+                            if (type === 'display' && data && data.length > 50) {
+                                return data.substring(0, 50) + '...';
+                            }
+                            return data;
+                        }
+                    }
+                ],
+                language: {
+                    search: "Filter records:",
+                    searchPlaceholder: "Type to filter data...",
+                    lengthMenu: "Show _MENU_ entries",
+                    info: "Showing _START_ to _END_ of _TOTAL_ entries",
+                    infoEmpty: "No entries available",
+                    infoFiltered: "(filtered from _MAX_ total entries)"
+                }
+            });
+
+            // Update status
+            $('#data-status').html(`
+                <div class="alert alert-success">
+                    <strong>Data loaded successfully!</strong><br>
+                    Total records: ${data.length.toLocaleString()}<br>
+                    Columns: ${columns.length}
+                </div>
+            `);
+        }
+
+        $(document).ready(function() {
+            // Fetch data button
+            $('#fetch-data-btn').click(function() {
+                showLoading('Running data pipeline...');
+
+                $.post('/fetch_pipeline_data')
+                    .done(function(response) {
+                        if (response.status === 'success') {
+                            renderTable(response.data);
+                        } else {
+                            $('#data-status').html(`<div class="alert alert-danger">Error: ${response.message}</div>`);
+                        }
+                    })
+                    .fail(function(xhr, status, error) {
+                        $('#data-status').html(`<div class="alert alert-danger">Failed to fetch data: ${error}</div>`);
+                    })
+                    .always(function() {
+                        hideLoading();
+                    });
+            });
+        });
+    </script>
+</body>
+</html>
