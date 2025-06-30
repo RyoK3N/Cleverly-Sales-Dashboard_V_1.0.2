@@ -661,7 +661,7 @@ def process_data(dataframes: dict[str, pd.DataFrame], st_date: str,
                  end_date: str, filter_column: str) -> pd.DataFrame:
     """
     Build the KPI table for the date range [st_date, end_date] (inclusive).
-    
+
     Parameters
     ----------
     dataframes     output of fetch_data(); keys such as 'scheduled', 'won', …
@@ -815,13 +815,11 @@ def process_data(dataframes: dict[str, pd.DataFrame], st_date: str,
         pipe_rev.groupby("Owner")["Deal Value"].sum().reindex(kpi.index,
                                                               fill_value=0))
 
-    # ── TOTAL ROW  ──────────────────────────────────────────────────────────
+    # ── TOTAL ROW  ────────────────────────────────────────────────────
     totals = {
         "Owner": "Total",
         "New Calls Booked": kpi["New Calls Booked"].sum(),
         "Sales Call Taken": kpi["Sales Call Taken"].sum(),
-        "Cold Emails": kpi["Cold Emails"].sum(),
-        "LinkedIn": kpi["LinkedIn"].sum(),
         "Proposals": kpi["Proposals"].sum(),
         "Show Rate %": kpi["Show Rate %"].mean(),
         "Unqualified": kpi["Unqualified"].sum(),
@@ -837,11 +835,14 @@ def process_data(dataframes: dict[str, pd.DataFrame], st_date: str,
         "Revenue Per Showed Up $": kpi["Revenue Per Showed Up $"].mean(),
         "Revenue Per Proposal $": kpi["Revenue Per Proposal $"].mean(),
         "Pipeline Revenue $": kpi["Pipeline Revenue $"].sum(),
+        "Cold Emails": kpi["Cold Emails"].sum(),
+        "LinkedIn": kpi["LinkedIn"].sum(),
     }
 
-    kpi_final = (pd.concat([kpi,
-                            pd.DataFrame([totals]).set_index("Owner")
-                            ]).reset_index(drop=True)).drop(columns=["Close"],
-                                                            errors="ignore")
+    # Create totals row with proper index
+    totals_df = pd.DataFrame([totals])
 
+    # Concatenate the main KPI data with totals
+    kpi_final = pd.concat([kpi.reset_index(drop=True), totals_df], 
+                         ignore_index=True).drop(columns=["Close"], errors="ignore")
     return kpi_final
