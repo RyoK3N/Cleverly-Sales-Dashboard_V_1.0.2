@@ -84,7 +84,7 @@ GROUP_NAMES = [
 # Main
 # --------------------------------------------------------------------------- #
 def main() -> None:
-    session_dir = Path("./sessions")
+    session_dir = Path("./sessions/sessions")
     session_dir.mkdir(exist_ok=True)
 
     try:

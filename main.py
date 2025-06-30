@@ -162,92 +162,156 @@ def logout():
 
 @app.route("/fetch-data", methods=["POST"])
 def fetch_monday_data():
-    """
-    POST /fetch-data
-    – If <7 session CSV files OR the average file age ≥24 h, download fresh data
-    – Save each group to CSV + save whole payload to JSON
-    """
-    session_dir = Path("./sessions")
+    session_dir = Path("./sessions/sessions")
     session_dir.mkdir(exist_ok=True)
 
     try:
-        now_time = datetime.now()
-
-        # Count only the CSV files we create
+        now = datetime.now()
         csv_files = [p for p in session_dir.glob("*.csv") if p.is_file()]
 
-        # -------------------- 1. FEWER THAN 7 FILES → FETCH ------------------
+        # ── 1. Decide whether refresh is needed ────────────────────────────
+        needs_refresh = False
         if len(csv_files) < 7:
-            logger.info(
-                "Found %d CSV file(s) in sessions (need 7) → fetching fresh data.",
-                len(csv_files),
-            )
-
-        # -------------------- 2. EXACTLY 7 FILES → AGE CHECK -----------------
+            needs_refresh = True
+            logger.info("Only %d CSV file(s) found – refreshing",
+                        len(csv_files))
         else:
-            deltas = []
+            ages = []
             for fp in csv_files:
                 try:
-                    # Filename pattern:  <group>_YYYY-MM-DD_HH-MM-SS.csv
-                    ts_part = fp.stem.split("_", 1)[1]
-                    file_dt = datetime.strptime(ts_part, "%Y-%m-%d_%H-%M-%S")
-                    deltas.append(now_time - file_dt)
-                except (IndexError, ValueError):
-                    logger.warning(
-                        "Unrecognised timestamp in %s – treating as stale.",
-                        fp.name)
-                    deltas.append(timedelta(days=365))
+                    ts = fp.stem.split("_", 1)[1]
+                    ages.append(now -
+                                datetime.strptime(ts, "%Y-%m-%d_%H-%M-%S"))
+                except Exception:
+                    logger.warning("Unparseable timestamp: %s", fp.name)
+                    ages.append(timedelta(days=365))
+            if sum(ages, timedelta()) / len(ages) >= timedelta(hours=24):
+                needs_refresh = True
+                logger.info("Average age ≥ 24 h – refreshing")
 
-            avg_age = sum(deltas, timedelta()) / len(deltas)
-            logger.debug("Average age of session data: %.1f hours",
-                         avg_age.total_seconds() / 3600)
+        if not needs_refresh:
+            return jsonify(success=True,
+                           message="Data is already up-to-date"), 200
 
-            if avg_age.total_seconds() < 86_400:  # 24 h
-                return jsonify(success=True,
-                               message="Data is already up to date")
+        # ── 2. Run pipeline -----------------------------------------------------------------
+        logger.info("Launching data_pipeline2.py …")
+        proc = subprocess.run(
+            [sys.executable, "data_pipeline2.py"],
+            cwd=".",
+            capture_output=True,
+            text=True,
+        )
 
-            logger.info(
-                "Session data average age ≥ 24 h → fetching fresh data.")
+        if proc.returncode != 0:
+            logger.error("Pipeline failed:\n%s", proc.stderr)
+            return (
+                jsonify(
+                    success=False,
+                    message="Pipeline execution failed",
+                    stderr=proc.stderr,
+                ),
+                500,
+            )
 
-        # -------------------- 3. FETCH & SAVE NEW DATA -----------------------
-        logger.info("Starting data fetch from Monday.com …")
-        data = fetch_data()  # expected dict-like {name: DataFrame}
-
-        if not isinstance(data, dict):
-            raise TypeError(
-                f"fetch_data() must return a dict, got {type(data)}")
-
-        logger.info("Successfully fetched data with %d groups.", len(data))
-
-        timestamp = now_time.strftime("%Y-%m-%d_%H-%M-%S")
-
-        # Save each group as CSV
-        for idx, (name, df) in enumerate(data.items(), 1):
-            safe = "_".join(str(name).strip().lower().split()) or f"group{idx}"
-            out_csv = session_dir / f"{safe}_{timestamp}.csv"
-            df.to_csv(out_csv, index=False)
-            logger.info("Saved %s", out_csv.name)
-
-        # Save **entire** payload as JSON (DataFrames → list-of-dicts)
-        consolidated = {
-            k: v.to_dict(orient="records")
-            for k, v in data.items()
-        }
-        out_json = session_dir / f"data_{timestamp}.json"
-        out_json.write_text(json.dumps(consolidated, indent=2),
-                            encoding="utf-8")
-        logger.info("Saved %s", out_json.name)
-
-        return jsonify(
-            success=True,
-            message=f"Fetched & saved data for {len(data)} groups.",
+        logger.debug("Pipeline stdout:\n%s", proc.stdout)
+        return (
+            jsonify(success=True, message="Fresh data downloaded"),
+            200,
         )
 
     except Exception as exc:
-        logger.error("Error fetching Monday data: %s", exc)
-        logger.debug("Traceback:\n%s", traceback.format_exc())
-        return jsonify(success=False,
-                       message=f"Failed to fetch data: {exc}"), 500
+        logger.exception("Unexpected error during /fetch-data:")
+        return jsonify(success=False, message=str(exc)), 500
+
+
+# @app.route("/fetch-data", methods=["POST"])
+# def fetch_monday_data():
+#     """
+#     POST /fetch-data
+#     – If <7 session CSV files OR the average file age ≥24 h, download fresh data
+#     – Save each group to CSV + save whole payload to JSON
+#     """
+#     session_dir = Path("./sessions")
+#     session_dir.mkdir(exist_ok=True)
+
+#     try:
+#         now_time = datetime.now()
+
+#         # Count only the CSV files we create
+#         csv_files = [p for p in session_dir.glob("*.csv") if p.is_file()]
+
+#         # -------------------- 1. FEWER THAN 7 FILES → FETCH ------------------
+#         if len(csv_files) < 7:
+#             logger.info(
+#                 "Found %d CSV file(s) in sessions (need 7) → fetching fresh data.",
+#                 len(csv_files),
+#             )
+
+#         # -------------------- 2. EXACTLY 7 FILES → AGE CHECK -----------------
+#         else:
+#             deltas = []
+#             for fp in csv_files:
+#                 try:
+#                     # Filename pattern:  <group>_YYYY-MM-DD_HH-MM-SS.csv
+#                     ts_part = fp.stem.split("_", 1)[1]
+#                     file_dt = datetime.strptime(ts_part, "%Y-%m-%d_%H-%M-%S")
+#                     deltas.append(now_time - file_dt)
+#                 except (IndexError, ValueError):
+#                     logger.warning(
+#                         "Unrecognised timestamp in %s – treating as stale.",
+#                         fp.name)
+#                     deltas.append(timedelta(days=365))
+
+#             avg_age = sum(deltas, timedelta()) / len(deltas)
+#             logger.debug("Average age of session data: %.1f hours",
+#                          avg_age.total_seconds() / 3600)
+
+#             if avg_age.total_seconds() < 86_400:  # 24 h
+#                 return jsonify(success=True,
+#                                message="Data is already up to date")
+
+#             logger.info(
+#                 "Session data average age ≥ 24 h → fetching fresh data.")
+
+#         # -------------------- 3. FETCH & SAVE NEW DATA -----------------------
+#         logger.info("Starting data fetch from Monday.com …")
+#         data = fetch_data()  # expected dict-like {name: DataFrame}
+
+#         if not isinstance(data, dict):
+#             raise TypeError(
+#                 f"fetch_data() must return a dict, got {type(data)}")
+
+#         logger.info("Successfully fetched data with %d groups.", len(data))
+
+#         timestamp = now_time.strftime("%Y-%m-%d_%H-%M-%S")
+
+#         # Save each group as CSV
+#         for idx, (name, df) in enumerate(data.items(), 1):
+#             safe = "_".join(str(name).strip().lower().split()) or f"group{idx}"
+#             out_csv = session_dir / f"{safe}_{timestamp}.csv"
+#             df.to_csv(out_csv, index=False)
+#             logger.info("Saved %s", out_csv.name)
+
+#         # Save **entire** payload as JSON (DataFrames → list-of-dicts)
+#         consolidated = {
+#             k: v.to_dict(orient="records")
+#             for k, v in data.items()
+#         }
+#         out_json = session_dir / f"data_{timestamp}.json"
+#         out_json.write_text(json.dumps(consolidated, indent=2),
+#                             encoding="utf-8")
+#         logger.info("Saved %s", out_json.name)
+
+#         return jsonify(
+#             success=True,
+#             message=f"Fetched & saved data for {len(data)} groups.",
+#         )
+
+#     except Exception as exc:
+#         logger.error("Error fetching Monday data: %s", exc)
+#         logger.debug("Traceback:\n%s", traceback.format_exc())
+#         return jsonify(success=False,
+#                        message=f"Failed to fetch data: {exc}"), 500
 
 
 @app.route('/fetch-calendly-data', methods=['POST'])
@@ -298,7 +362,7 @@ def update_llm_context():
                 "message": "Expected JSON request"
             })
 
-        latest_file = max(Path('./sessions').glob('data_*.json'),
+        latest_file = max(Path('./sessions/sessions').glob('data_*.json'),
                           key=lambda f: f.stat().st_mtime)
         logger.info(f"Using data file: {latest_file}")
 
@@ -347,7 +411,7 @@ def update_llm_context():
 @app.route('/get_owners', methods=['GET'])
 def get_owners():
     try:
-        SESSION_DIR = Path("./sessions")
+        SESSION_DIR = Path("./sessions/sessions")
         latest_file = max(SESSION_DIR.glob("data_*.json"),
                           key=lambda f: f.stat().st_mtime)
 
@@ -371,7 +435,7 @@ def apply_filters_route():
     try:
         logger.info("Starting apply_filters_route")
         # Identify the latest data file in the sessions folder
-        SESSION_DIR = Path("./sessions")
+        SESSION_DIR = Path("./sessions/sessions")
         data_files = [
             f for f in SESSION_DIR.glob("data_*.json") if f.is_file()
         ]
@@ -465,7 +529,7 @@ def data():
 @login_required
 def get_latest_data():
     try:
-        SESSION_DIR = Path("./sessions")
+        SESSION_DIR = Path("./sessions/sessions")
         data_files = [
             f for f in SESSION_DIR.glob("data_*.json") if f.is_file()
         ]
@@ -660,7 +724,7 @@ def generate_predictions():
         from pathlib import Path
 
         # Find the latest scheduled CSV file
-        session_dir = Path("./sessions")
+        session_dir = Path("./sessions/sessions")
         scheduled_files = list(session_dir.glob("scheduled_*.csv"))
 
         if not scheduled_files:
@@ -939,7 +1003,7 @@ def merge_calendly_data():
             })
 
         # Find latest Monday.com data from sessions folder by timestamp
-        session_dir = Path("./sessions")
+        session_dir = Path("./sessions/sessions")
         data_files = [
             f for f in session_dir.glob("data_*.json") if f.is_file()
         ]
@@ -1126,7 +1190,7 @@ def chatbot_ai():
                 })
 
             # Check if session directory exists and contains data files
-            session_dir = Path('./sessions')
+            session_dir = Path('./sessions/sessions')
             data_files = [
                 f for f in session_dir.glob('data_*.json') if f.is_file()
             ]
