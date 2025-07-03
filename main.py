@@ -58,7 +58,7 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 from monday_extract_groups import fetch_data
 import json
 import os
-from monday_extract_groups import process_data
+from monday_extract_groups import process_data , process_data_COLD_EMAIL
 import requests
 import numpy as np
 import pandas as pd
@@ -1376,7 +1376,7 @@ def apply_filters_cold_email():
         selected_owners = request.json.get('selected_owners', [])
         
         # Process the filtered data (only cold-email origin)
-        processed_df = process_data(data, st_date, end_date, filter_column)
+        processed_df = process_data_COLD_EMAIL(data, st_date, end_date, filter_column)
 
         if selected_owners:
             # Filter data by selected owners (excluding any existing Total row)

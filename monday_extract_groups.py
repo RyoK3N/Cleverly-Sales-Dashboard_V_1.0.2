@@ -849,3 +849,199 @@ def process_data(dataframes: dict[str, pd.DataFrame], st_date: str,
                           ignore_index=True).drop(columns=["Close"],
                                                   errors="ignore")
     return kpi_final
+
+def process_data_COLD_EMAIL(dataframes: dict[str, pd.DataFrame], st_date: str,
+     end_date: str, filter_column: str) -> pd.DataFrame:
+    """
+    Build the KPI table for the date range [st_date, end_date] (inclusive).
+    
+    Parameters
+    ----------
+    dataframes     output of fetch_data(); keys such as 'scheduled', 'won', …
+    st_date        'YYYY-MM-DD' – range start
+    end_date       'YYYY-MM-DD' – range end
+    filter_column  column chosen in the UI for date filtering
+    (usually 'Date Created' , 'Sales Call Date' , '')
+    """
+    # ── unpack individual stages (empty DF if missing) ────────────────────
+    op_cancelled = dataframes.get("cancelled", pd.DataFrame())
+    op_lost = dataframes.get("lost", pd.DataFrame())
+    op_noshow = dataframes.get("noshow", pd.DataFrame())
+    op_proposal = dataframes.get("proposal", pd.DataFrame())
+    op_scheduled = dataframes.get("scheduled", pd.DataFrame())
+    op_unqualified = dataframes.get("unqualified", pd.DataFrame())
+    op_won = dataframes.get("won", pd.DataFrame())
+    
+    # ── canonical list of owners  (whitespace already normalised in fetch_data)
+    owners = (pd.concat([
+    op_cancelled, op_lost, op_noshow, op_proposal, op_scheduled,
+    op_unqualified, op_won
+    ])["Owner"].dropna().unique())
+    kpi = pd.DataFrame(index=owners)
+    kpi.index.name = "Owner"
+    kpi["Owner"] = kpi.index  # explicit column for display
+    
+    # ── convenience: date-range filter  ───────────────────────────────────
+    def _filter(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
+        if date_col not in df.columns:
+            return pd.DataFrame(columns=df.columns)
+        
+        dates = pd.to_datetime(df[date_col].apply(extract_date),
+                           errors="coerce").dt.date
+        mask = ((dates >= pd.to_datetime(st_date).date()) &
+            (dates <= pd.to_datetime(end_date).date()))
+        return df.loc[mask]
+    
+    fdate = _filter  # alias
+    
+    # ───────────────────────────────────────────────────────────────────────
+    #  RAW COUNTS
+    # ───────────────────────────────────────────────────────────────────────
+    all_stages = pd.concat([
+    op_cancelled, op_lost, op_noshow, op_proposal, op_scheduled,
+    op_unqualified, op_won
+    ])
+    kpi["New Calls Booked"] = (fdate(
+    all_stages,
+    filter_column).groupby("Owner").size().reindex(kpi.index,
+                                               fill_value=0))
+    
+    sc_taken_df = pd.concat([op_unqualified, op_proposal, op_won, op_lost])
+    kpi["Sales Call Taken"] = (fdate(
+    sc_taken_df,
+    filter_column).groupby("Owner").size().reindex(kpi.index,
+                                               fill_value=0))
+    
+    kpi["Unqualified"] = (fdate(op_unqualified,
+                        filter_column).groupby("Owner").size().reindex(
+                            kpi.index, fill_value=0))
+    
+    kpi["Cancelled Calls"] = (fdate(
+    op_cancelled,
+    filter_column).groupby("Owner").size().reindex(kpi.index,
+                                               fill_value=0))
+    
+    # Proposals count = Proposal + Won + Lost (anchor to Sales Call date if present)
+    prop_date_col = ("Sales Call Date" if "Sales Call Date"
+             in op_proposal.columns else filter_column)
+    kpi["Proposals"] = (pd.concat([op_proposal, op_won, op_lost]).pipe(
+    lambda df: fdate(df, prop_date_col)).groupby("Owner").size().reindex(
+    kpi.index, fill_value=0))
+    
+    # ───────────────────────────────────────────────────────────────────────
+    #  Origin Counts
+    # ───────────────────────────────────────────────────────────────────────
+    #Count the number of cold emails in origin column and group by owner
+    cold_emails = all_stages[all_stages['origin'] == 'cold-email']
+    kpi["Cold Emails"] = cold_emails.groupby("Owner").size().reindex(
+    kpi.index, fill_value=0)
+    
+    #Count the number of linkedin in origin column and group by owner
+    # linkedin = all_stages[all_stages['origin'] == 'LinkedIn']
+    # kpi["LinkedIn"] = linkedin.groupby("Owner").size().reindex(kpi.index,
+    #                                                            fill_value=0)
+    # kpi["LinkedIn"] = np.where(kpi['New Calls Booked'] > 0,
+    #                    kpi['New Calls Booked'] - kpi['Cold Emails'], 0)
+    
+    # ───────────────────────────────────────────────────────────────────────
+    #  RATE METRICS  (all numeric, no NaN/None)
+    # ───────────────────────────────────────────────────────────────────────
+    with np.errstate(divide="ignore", invalid="ignore"):
+        kpi["Show Rate %"] = (kpi["Sales Call Taken"] / kpi["New Calls Booked"]
+                          ).replace([np.inf, -np.inf], 0).fillna(0) * 100
+        
+        kpi["Unqualified Rate %"] = (kpi["Unqualified"] /
+                                 kpi["New Calls Booked"]).replace(
+                                     [np.inf, -np.inf], 0).fillna(0) * 100
+        
+        kpi["Cancellation Rate %"] = (kpi["Cancelled Calls"] /
+                                  kpi["New Calls Booked"]).replace(
+                                      [np.inf, -np.inf], 0).fillna(0) * 100
+        
+        kpi["Proposal Rate %"] = (kpi["Proposals"] /
+                              kpi["New Calls Booked"]).replace(
+                                  [np.inf, -np.inf], 0).fillna(0) * 100
+    
+    # Close metrics
+    closes = fdate(op_won, prop_date_col).groupby("Owner").size()
+    kpi["Close"] = closes.reindex(kpi.index, fill_value=0)  # helper column
+    
+    with np.errstate(divide="ignore", invalid="ignore"):
+        kpi["Close Rate %"] = (kpi["Close"] / kpi["New Calls Booked"]).replace(
+        [np.inf, -np.inf], 0).fillna(0) * 100
+        
+        kpi["Close Rate(Show) %"] = (kpi["Close"] /
+                                 kpi["Sales Call Taken"]).replace(
+                                     [np.inf, -np.inf], 0).fillna(0) * 100
+        
+        kpi["Close Rate(MQL) %"] = (kpi["Close"] / kpi["Proposals"].replace(
+        0, np.nan)).replace([np.inf, -np.inf], 0).fillna(0) * 100
+    
+    # ───────────────────────────────────────────────────────────────────────
+    #  REVENUE METRICS
+    # ───────────────────────────────────────────────────────────────────────
+    # Always use the user-selected filter_column for consistency
+    won_rev = fdate(op_won.copy(), filter_column)
+    won_rev["Deal Value"] = pd.to_numeric(won_rev["Deal Value"],
+                                  errors="coerce").fillna(0)
+    
+    rev_sum = won_rev.groupby("Owner")["Deal Value"].sum()
+    kpi["Closed Revenue $"] = rev_sum.reindex(kpi.index, fill_value=0)
+    
+    with np.errstate(divide="ignore", invalid="ignore"):
+        kpi["Revenue Per Call $"] = (kpi["Closed Revenue $"] /
+                                 kpi["New Calls Booked"]).replace(
+                                     [np.inf, -np.inf], 0).fillna(0)
+        
+        kpi["Revenue Per Showed Up $"] = (kpi["Closed Revenue $"] /
+                                      kpi["Sales Call Taken"]).replace(
+                                          [np.inf, -np.inf], 0).fillna(0)
+        
+        kpi["Revenue Per Proposal $"] = (
+        kpi["Closed Revenue $"] /
+        kpi["Proposals"].replace(0, np.nan)).replace([np.inf, -np.inf],
+                                                     0).fillna(0)
+    
+    # Pipeline revenue (open proposals)
+    pipe_rev = fdate(op_proposal.copy(), prop_date_col)
+    pipe_rev["Deal Value"] = pd.to_numeric(pipe_rev["Deal Value"],
+                                   errors="coerce").fillna(0)
+    kpi["Pipeline Revenue $"] = (
+    pipe_rev.groupby("Owner")["Deal Value"].sum().reindex(kpi.index,
+                                                      fill_value=0))
+    
+    # ── TOTAL ROW  ────────────────────────────────────────────────────
+    totals = {
+    "Owner": "Total",
+    "New Calls Booked": kpi["New Calls Booked"].sum(),
+    "Sales Call Taken": kpi["Sales Call Taken"].sum(),
+    "Proposals": kpi["Proposals"].sum(),
+    "Show Rate %": kpi["Show Rate %"].mean(),
+    "Unqualified": kpi["Unqualified"].sum(),
+    "Unqualified Rate %": kpi["Unqualified Rate %"].mean(),
+    "Cancelled Calls": kpi["Cancelled Calls"].sum(),
+    "Cancellation Rate %": kpi["Cancellation Rate %"].mean(),
+    "Proposal Rate %": kpi["Proposal Rate %"].mean(),
+    "Close Rate %": kpi["Close Rate %"].mean(),
+    "Close Rate(Show) %": kpi["Close Rate(Show) %"].mean(),
+    "Close Rate(MQL) %": kpi["Close Rate(MQL) %"].mean(),
+    "Closed Revenue $": kpi["Closed Revenue $"].sum(),
+    "Revenue Per Call $": kpi["Revenue Per Call $"].mean(),
+    "Revenue Per Showed Up $": kpi["Revenue Per Showed Up $"].mean(),
+    "Revenue Per Proposal $": kpi["Revenue Per Proposal $"].mean(),
+    "Pipeline Revenue $": kpi["Pipeline Revenue $"].sum(),
+    "Cold Emails": kpi["Cold Emails"].sum(),
+    #"LinkedIn": kpi["LinkedIn"].sum(),
+    }
+    
+    # Create totals row with proper index
+    totals_df = pd.DataFrame([totals])
+    
+    # Concatenate the main KPI data with totals
+    kpi_final = pd.concat([kpi.reset_index(drop=True), totals_df],
+                  ignore_index=True).drop(columns=["Close"],
+                                          errors="ignore")
+    return kpi_final
+
+
+
