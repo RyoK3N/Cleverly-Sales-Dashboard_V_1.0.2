@@ -744,9 +744,11 @@ def process_data(dataframes: dict[str, pd.DataFrame], st_date: str,
         kpi.index, fill_value=0)
 
     #Count the number of linkedin in origin column and group by owner
-    linkedin = all_stages[all_stages['origin'] == 'LinkedIn']
-    kpi["LinkedIn"] = linkedin.groupby("Owner").size().reindex(kpi.index,
-                                                               fill_value=0)
+    # linkedin = all_stages[all_stages['origin'] == 'LinkedIn']
+    # kpi["LinkedIn"] = linkedin.groupby("Owner").size().reindex(kpi.index,
+    #                                                            fill_value=0)
+    kpi["LinkedIn"] = np.where(kpi['New Calls Booked'] > 0,
+                               kpi['New Calls Booked'] - kpi['Cold Emails'], 0)
 
     # ───────────────────────────────────────────────────────────────────────
     #  RATE METRICS  (all numeric, no NaN/None)
@@ -843,6 +845,7 @@ def process_data(dataframes: dict[str, pd.DataFrame], st_date: str,
     totals_df = pd.DataFrame([totals])
 
     # Concatenate the main KPI data with totals
-    kpi_final = pd.concat([kpi.reset_index(drop=True), totals_df], 
-                         ignore_index=True).drop(columns=["Close"], errors="ignore")
+    kpi_final = pd.concat([kpi.reset_index(drop=True), totals_df],
+                          ignore_index=True).drop(columns=["Close"],
+                                                  errors="ignore")
     return kpi_final

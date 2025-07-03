@@ -537,7 +537,7 @@ def create_embeddings(text):
         return None
 
 
-@app.route('/data')
+@app.route('/cold-email')
 @login_required
 def data():
     if not current_user.is_authenticated:
@@ -1324,6 +1324,101 @@ def chatbot_ai():
         return jsonify({"status": "error", "message": str(e)})
 
     return render_template('chatbot.html')
+
+@app.route('/apply_filters_cold_email', methods=['POST'])
+def apply_filters_cold_email():
+    #same apply_filter but the data should be filtered by origin == cold-email
+    try:
+        logger.info("Starting apply_filters_cold_email")
+        # Identify the latest data file in the sessions folder
+        SESSION_DIR = Path("./sessions/sessions")
+        data_files = [
+            f for f in SESSION_DIR.glob("data_*.json") if f.is_file()
+        ]
+        logger.info(f"Found {len(data_files)} data files")
+        latest_file = max(data_files,
+                          key=lambda f: f.stat().st_mtime,
+                          default=None)
+
+        if not latest_file:
+            return jsonify({
+                "status":
+                "error",
+                "message":
+                "No data files found in the session directory."
+            })
+
+        logger.info(f"Loading data from {latest_file}")
+        with latest_file.open("r", encoding="utf-8") as file:
+            json_data = json.load(file)
+            # Convert JSON data into DataFrames
+            data = {}
+            for key, items in json_data.items():
+                data[key] = pd.DataFrame(items)
+                logger.info(
+                    f"Created DataFrame for {key} with {len(items)} rows")
+
+        st_date = request.json.get('start_date', '1900-01-01').strip()
+        end_date = request.json.get('end_date', '2100-12-31').strip()
+        filter_column = request.json.get('filter_column',
+                                         ['Sales Call Date', 'Date Created'])
+        if not filter_column:
+            filter_column = 'Sales Call Date'  # Default value if none provided
+        logger.info(
+            f"Processing data with date range {st_date} to {end_date} on column {filter_column}"
+        )
+        selected_owners = request.json.get('selected_owners', [])
+        processed_df = process_data(data, st_date, end_date, filter_column)
+
+        if selected_owners:
+            # Filter data by selected owners (excluding any existing Total row)
+            filtered_df = processed_df[processed_df['Owner'].isin(selected_owners)]
+
+            # Recalculate totals for filtered data
+            numeric_cols = filtered_df.select_dtypes(include=[np.number]).columns
+            totals_dict = {'Owner': 'Total'}
+
+            for col in numeric_cols:
+                if col != 'Owner':
+                    if '%' in col or 'Rate' in col:
+                        # For percentage columns, calculate mean
+                        totals_dict[col] = filtered_df[col].mean()
+                    else:
+                        # For other numeric columns, calculate sum
+                        totals_dict[col] = filtered_df[col].sum()
+
+            # Create totals row DataFrame
+            totals_row = pd.DataFrame([totals_dict])
+
+            # Combine filtered data with new totals row
+            processed_df = pd.concat([filtered_df, totals_row], ignore_index=True)
+
+        logger.info(
+            f"Data processing complete. Processed DataFrame has {len(processed_df)} rows"
+        )
+
+        processed_df.replace({
+            np.nan: None,
+            np.inf: None,
+            -np.inf: None
+        },
+                             inplace=True)
+
+        numeric_columns = processed_df.select_dtypes(
+            include=[np.number]).columns
+        for col in numeric_columns:
+            processed_df[col] = processed_df[col].astype(float)
+
+        table_html = processed_df.to_html(
+            classes='table table-striped table-bordered',
+            index=False,
+            border=0)
+        return jsonify({"status": "success", "table": table_html})
+
+    except Exception as e:
+        logger.error("Error in apply_filters_route: %s", e)
+        logger.debug("Traceback:\n%s", traceback.format_exc())
+        return jsonify({"status": "error", "message": str(e)})
 
 
 # --------------------------------------------------------------------------- #
