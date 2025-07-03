@@ -577,8 +577,8 @@
                                         var api = this.api();
                                         api.rows().every(function() {
                                             var data = this.data();
-                                            if (data && data[0] && data[0].toString().toLowerCase().includes('total')) {
-                                                $(this.node()).addClass('table-warning').css({
+                                            if (data && data[0] && data[0].toString().toLowerCase() === 'total') {
+                                                $(this.node()).css({
                                                     'background-color': '#e3f2fd !important',
                                                     'font-weight': 'bold !important',
                                                     'border-top': '2px solid #007bff !important'
