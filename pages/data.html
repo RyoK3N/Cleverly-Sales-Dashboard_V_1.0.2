@@ -97,14 +97,7 @@
             transform: scale(1.01);
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
-        .table tbody tr:last-child {
-            background-color: #e3f2fd !important;
-            font-weight: bold;
-            border-top: 2px solid #007bff;
-        }
-        .table tbody tr:last-child:hover {
-            background-color: #bbdefb !important;
-        }
+        
         .table-responsive {
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
@@ -572,25 +565,7 @@
                                             }
                                         });
                                     },
-                                    drawCallback: function() {
-                                        // Highlight the total row after each draw/filter
-                                        var api = this.api();
-                                        api.rows().every(function() {
-                                            var data = this.data();
-                                            if (data && data[0] && data[0].toString().toLowerCase() === 'total') {
-                                                $(this.node()).css({
-                                                    'background-color': '#e3f2fd !important',
-                                                    'font-weight': 'bold !important',
-                                                    'border-top': '2px solid #007bff !important'
-                                                });
-                                                // Remove owner-cell styling from all cells in total row
-                                                $(this.node()).find('td').removeClass('owner-cell').css({
-                                                    'color': '#495057 !important',
-                                                    'font-weight': 'bold !important'
-                                                });
-                                            }
-                                        });
-                                    }
+                                    
                                 });
                             });
                         });
