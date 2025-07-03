@@ -537,7 +537,7 @@ def create_embeddings(text):
         return None
 
 
-@app.route('/cold-email')
+@app.route('/data')
 @login_required
 def data():
     if not current_user.is_authenticated:
@@ -1327,7 +1327,6 @@ def chatbot_ai():
 
 @app.route('/apply_filters_cold_email', methods=['POST'])
 def apply_filters_cold_email():
-    #same apply_filter but the data should be filtered by origin == cold-email
     try:
         logger.info("Starting apply_filters_cold_email")
         # Identify the latest data file in the sessions folder
@@ -1351,33 +1350,42 @@ def apply_filters_cold_email():
         logger.info(f"Loading data from {latest_file}")
         with latest_file.open("r", encoding="utf-8") as file:
             json_data = json.load(file)
-            # Convert JSON data into DataFrames
+            # Convert JSON data into DataFrames and filter by origin='cold-email'
             data = {}
             for key, items in json_data.items():
-                data[key] = pd.DataFrame(items)
-                logger.info(
-                    f"Created DataFrame for {key} with {len(items)} rows")
+                df = pd.DataFrame(items)
+                # Filter only cold-email origin data
+                if 'origin' in df.columns:
+                    df_filtered = df[df['origin'] == 'cold-email']
+                    logger.info(f"Group {key}: {len(df)} total rows, {len(df_filtered)} cold-email rows")
+                else:
+                    # If no origin column, assume no cold-email data
+                    df_filtered = pd.DataFrame(columns=df.columns)
+                    logger.info(f"Group {key}: No origin column found, using empty DataFrame")
+                
+                data[key] = df_filtered
 
         st_date = request.json.get('start_date', '1900-01-01').strip()
         end_date = request.json.get('end_date', '2100-12-31').strip()
-        filter_column = request.json.get('filter_column',
-                                         ['Sales Call Date', 'Date Created'])
+        filter_column = request.json.get('filter_column', 'Sales Call Date')
         if not filter_column:
             filter_column = 'Sales Call Date'  # Default value if none provided
         logger.info(
-            f"Processing data with date range {st_date} to {end_date} on column {filter_column}"
+            f"Processing cold-email data with date range {st_date} to {end_date} on column {filter_column}"
         )
         selected_owners = request.json.get('selected_owners', [])
+        
+        # Process the filtered data (only cold-email origin)
         processed_df = process_data(data, st_date, end_date, filter_column)
 
         if selected_owners:
             # Filter data by selected owners (excluding any existing Total row)
             filtered_df = processed_df[processed_df['Owner'].isin(selected_owners)]
-
+            
             # Recalculate totals for filtered data
             numeric_cols = filtered_df.select_dtypes(include=[np.number]).columns
             totals_dict = {'Owner': 'Total'}
-
+            
             for col in numeric_cols:
                 if col != 'Owner':
                     if '%' in col or 'Rate' in col:
@@ -1386,15 +1394,15 @@ def apply_filters_cold_email():
                     else:
                         # For other numeric columns, calculate sum
                         totals_dict[col] = filtered_df[col].sum()
-
+            
             # Create totals row DataFrame
             totals_row = pd.DataFrame([totals_dict])
-
+            
             # Combine filtered data with new totals row
             processed_df = pd.concat([filtered_df, totals_row], ignore_index=True)
-
+        
         logger.info(
-            f"Data processing complete. Processed DataFrame has {len(processed_df)} rows"
+            f"Cold-email data processing complete. Processed DataFrame has {len(processed_df)} rows"
         )
 
         processed_df.replace({
@@ -1416,7 +1424,7 @@ def apply_filters_cold_email():
         return jsonify({"status": "success", "table": table_html})
 
     except Exception as e:
-        logger.error("Error in apply_filters_route: %s", e)
+        logger.error("Error in apply_filters_cold_email: %s", e)
         logger.debug("Traceback:\n%s", traceback.format_exc())
         return jsonify({"status": "error", "message": str(e)})
 
