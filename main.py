@@ -475,8 +475,28 @@ def apply_filters_route():
         processed_df = process_data(data, st_date, end_date, filter_column)
 
         if selected_owners:
-            processed_df = processed_df[processed_df['Owner'].isin(
-                selected_owners)]
+            # Filter data by selected owners (excluding any existing Total row)
+            filtered_df = processed_df[processed_df['Owner'].isin(selected_owners)]
+            
+            # Recalculate totals for filtered data
+            numeric_cols = filtered_df.select_dtypes(include=[np.number]).columns
+            totals_dict = {'Owner': 'Total'}
+            
+            for col in numeric_cols:
+                if col != 'Owner':
+                    if '%' in col or 'Rate' in col:
+                        # For percentage columns, calculate mean
+                        totals_dict[col] = filtered_df[col].mean()
+                    else:
+                        # For other numeric columns, calculate sum
+                        totals_dict[col] = filtered_df[col].sum()
+            
+            # Create totals row DataFrame
+            totals_row = pd.DataFrame([totals_dict])
+            
+            # Combine filtered data with new totals row
+            processed_df = pd.concat([filtered_df, totals_row], ignore_index=True)
+        
         logger.info(
             f"Data processing complete. Processed DataFrame has {len(processed_df)} rows"
         )
