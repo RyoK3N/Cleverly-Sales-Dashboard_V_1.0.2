@@ -550,9 +550,6 @@
                                         }
                                     ],
                                     initComplete: function() {
-                                        // Add custom styling to the Total row
-                                        $('#data-table table tbody tr:last-child').addClass('table-warning');
-                                        
                                         // Add search to individual columns
                                         this.api().columns().every(function() {
                                             var column = this;
@@ -565,6 +562,20 @@
                                                     if (column.search() !== this.value) {
                                                         column.search(this.value).draw();
                                                     }
+                                                });
+                                            }
+                                        });
+                                    },
+                                    drawCallback: function() {
+                                        // Highlight the total row after each draw/filter
+                                        var api = this.api();
+                                        api.rows().every(function() {
+                                            var data = this.data();
+                                            if (data && data[0] && data[0].toString().toLowerCase().includes('total')) {
+                                                $(this.node()).addClass('table-warning').css({
+                                                    'background-color': '#e3f2fd !important',
+                                                    'font-weight': 'bold',
+                                                    'border-top': '2px solid #007bff'
                                                 });
                                             }
                                         });
