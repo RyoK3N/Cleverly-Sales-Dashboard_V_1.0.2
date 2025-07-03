@@ -526,7 +526,13 @@
                                     columnDefs: [
                                         {
                                             targets: 0,
-                                            className: 'owner-cell'
+                                            className: 'owner-cell',
+                                            createdCell: function(td, cellData, rowData, row, col) {
+                                                // Don't apply owner-cell class to Total row
+                                                if (cellData && cellData.toString().toLowerCase() === 'total') {
+                                                    $(td).removeClass('owner-cell');
+                                                }
+                                            }
                                         },
                                         {
                                             targets: '_all',
@@ -574,8 +580,13 @@
                                             if (data && data[0] && data[0].toString().toLowerCase().includes('total')) {
                                                 $(this.node()).addClass('table-warning').css({
                                                     'background-color': '#e3f2fd !important',
-                                                    'font-weight': 'bold',
-                                                    'border-top': '2px solid #007bff'
+                                                    'font-weight': 'bold !important',
+                                                    'border-top': '2px solid #007bff !important'
+                                                });
+                                                // Remove owner-cell styling from all cells in total row
+                                                $(this.node()).find('td').removeClass('owner-cell').css({
+                                                    'color': '#495057 !important',
+                                                    'font-weight': 'bold !important'
                                                 });
                                             }
                                         });
